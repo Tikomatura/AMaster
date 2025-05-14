@@ -1,16 +1,16 @@
-# Navidrome Discord Bot
+# Selfhosted Discord Music Downloader Bot
 
-A lightweight, containerized Discord bot that allows whitelisted users to submit music links or audio files via DM. The bot downloads audio to a shared `/music` volume, making it compatible with [Navidrome](https://www.navidrome.org/) or any Subsonic-compatible music server.
+A lightweight, containerized Discord bot that allows whitelisted users to submit music links or upload audio files via Discord. It downloads and stores audio in a shared volume, making it usable with any media server such as [Navidrome](https://www.navidrome.org/), Jellyfin, or Plex — or just as a personal collection.
 
 ---
 
 ## 🎯 Features
 
 - `/upload <link>` — download audio from YouTube, Spotify, SoundCloud, etc.
-- `/upload_list` — list recent uploads with metadata (user, title, size, duration)
+- `/upload list` — list recent uploads with metadata (user, title, size, duration)
 - `/whitelist add/remove <@user or user_id>` — only the bot owner can manage access
 - `/whitelist list` — see all currently whitelisted user IDs
-- Downloads are saved in the `/music` directory for Navidrome access
+- Downloads are saved in a configurable `/music` directory
 - Whitelist and upload history are stored using a local SQLite database
 
 ---
@@ -24,27 +24,34 @@ DISCORD_TOKEN=your_discord_bot_token
 DISCORD_OWNER_ID=your_discord_user_id
 ```
 
+Optional environment variable:
+```env
+MUSIC_DIR=/music  # Path where downloaded files are stored
+```
+
 ---
 
 ## 🐳 Docker Setup
 
-This bot is designed to run alongside Navidrome in a Docker Compose stack. It pulls the latest code from GitHub on each start.
+This bot is designed to run standalone in Docker or Docker Compose. It pulls the latest code from GitHub on each container start.
 
 ### Example `docker-compose.yml`
 
 ```yaml
 services:
   discordbot:
-    image: navidrome-discordbot:latest
-    container_name: navidrome-discordbot
+    build:
+      context: https://github.com/Tikomatura/navidrome-discordbot.git
+      dockerfile: Dockerfile
+    container_name: discordbot
     restart: unless-stopped
     user: "999:993"
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - DISCORD_OWNER_ID=${DISCORD_OWNER_ID}
     volumes:
-      - /srv/docker/navidrome/music:/music
-    working_dir: /app
+      - /srv/docker/music:/music
+    working_dir: /app/code
 ```
 
 ---
@@ -55,7 +62,7 @@ services:
   - Pulls the latest version of this repo from GitHub
   - Installs Python dependencies
   - Launches the bot
-- The bot accepts Discord slash commands only via **Direct Messages**
+- The bot accepts Discord slash commands via **Direct Messages**
 - Only users in the whitelist (managed via slash commands) may upload links or files
 
 ---
@@ -80,7 +87,7 @@ services:
 ## 📁 Persistent Data
 
 - `botdata.db`: stores whitelist and upload history (SQLite)
-- `music/`: shared volume where audio is downloaded for Navidrome
+- `/music/`: shared volume where audio is downloaded
 
 ---
 
@@ -90,7 +97,7 @@ services:
 /upload https://www.youtube.com/watch?v=xyz123
 /whitelist add 123456789012345678
 /whitelist list
-/upload_list
+/upload list
 ```
 
 ---
