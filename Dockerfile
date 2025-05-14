@@ -1,14 +1,21 @@
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y git ffmpeg && apt-get clean
+# Set environment
+ENV PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
 
+# Install required tools
+RUN apt-get update && \
+    apt-get install -y git ffmpeg curl && \
+    pip install --no-cache-dir --upgrade pip
+
+# Install Python requirements
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Prepare app folder
 WORKDIR /app
+COPY startup.sh /app/startup.sh
+RUN chmod +x /app/startup.sh
 
-# Pre-install dependencies to avoid runtime install issues
-COPY requirements.txt requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY startup.sh /startup.sh
-RUN chmod +x /startup.sh
-
-CMD ["/startup.sh"]
+CMD ["/app/startup.sh"]
