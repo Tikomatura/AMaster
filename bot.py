@@ -37,7 +37,6 @@ def init_db():
                 timestamp TEXT
             )
         """)
-        # Auto-whitelist the owner
         c.execute("INSERT OR IGNORE INTO whitelist (user_id) VALUES (?)", (OWNER_ID,))
         conn.commit()
 
@@ -109,67 +108,84 @@ async def whitelist_cmd(interaction: discord.Interaction, action: str, user: dis
 
 upload_group = app_commands.Group(name="upload", description="Manage uploads")
 
-def create_upload_commands():
-    @upload_group.command(name="add", description="Submit a media link to download")
-    @app_commands.describe(link="Media URL to download")
-    async def upload_add(interaction: discord.Interaction, link: str):
-        if not is_whitelisted(interaction.user.id):
-            await interaction.response.send_message("You are not whitelisted. Contact the instance owner.", ephemeral=True)
-            return
+@upload_group.command(name="link", description="Submit a media link to download")
+@app_commands.describe(link="Media URL to download")
+async def upload_link(interaction: discord.Interaction, link: str):
+    if not is_whitelisted(interaction.user.id):
+        await interaction.response.send_message("You are not whitelisted. Contact the instance owner.", ephemeral=True)
+        return
 
-        await interaction.response.send_message(f"🔗 Download started: {link}")
+    await interaction.response.send_message(f"🔗 Download started: {link}")
 
-        try:
-            title = "Unknown Title"
-            size = "? MB"
-            duration = "?"
+    try:
+        title = "Unknown Title"
+        size = "? MB"
+        duration = "?"
 
-            if "spotify.com" in link:
-                cmd = ["spotdl", link, "--output", MUSIC_DIR]
-                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            else:
-                with tempfile.NamedTemporaryFile(mode='w+', delete=False) as tmpjson:
-                    cmd = ["yt-dlp", "--dump-json", "-x", "--audio-format", "mp3",
-                           "-o", f"{MUSIC_DIR}/%(title)s.%(ext)s", link]
-                    proc = subprocess.run(cmd, stdout=tmpjson, stderr=subprocess.PIPE)
-                    tmpjson.seek(0)
-                    try:
-                        data = json.loads(tmpjson.read())
-                        title = data.get("title", "Unknown Title")
-                        duration = f"{round(data.get('duration', 0)/60, 2)} min"
-                        size = f"{round(data.get('filesize', 0)/1024/1024, 2)} MB"
-                    except Exception:
-                        pass
+        if "spotify.com" in link:
+            cmd = ["spotdl", link, "--output", MUSIC_DIR]
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        else:
+            with tempfile.NamedTemporaryFile(mode='w+', delete=False) as tmpjson:
+                cmd = ["yt-dlp", "--dump-json", "-x", "--audio-format", "mp3",
+                       "-o", f"{MUSIC_DIR}/%(title)s.%(ext)s", link]
+                proc = subprocess.run(cmd, stdout=tmpjson, stderr=subprocess.PIPE)
+                tmpjson.seek(0)
+                try:
+                    data = json.loads(tmpjson.read())
+                    title = data.get("title", "Unknown Title")
+                    duration = f"{round(data.get('duration', 0)/60, 2)} min"
+                    size = f"{round(data.get('filesize', 0)/1024/1024, 2)} MB"
+                except Exception:
+                    pass
 
-            if title != "Unknown Title":
-                filepath = os.path.join(MUSIC_DIR, f"{title}.mp3")
-                if os.path.exists(filepath):
-                    await interaction.followup.send("⚠️ This file already exists in the library.")
-                    return
+        if title != "Unknown Title":
+            filepath = os.path.join(MUSIC_DIR, f"{title}.mp3")
+            if os.path.exists(filepath):
+                await interaction.followup.send("⚠️ This file already exists in the library.")
+                return
 
-            save_upload(interaction.user.id, link, title, size, duration)
-            await interaction.followup.send("✅ Download finished.")
-        except Exception as e:
-            await interaction.followup.send(f"❌ Download failed: {e}")
+        save_upload(interaction.user.id, link, title, size, duration)
+        await interaction.followup.send("✅ Download finished.")
+    except Exception as e:
+        await interaction.followup.send(f"❌ Download failed: {e}")
 
-    @upload_group.command(name="list", description="Show the latest uploads")
-    async def upload_list(interaction: discord.Interaction):
-        if interaction.user.id != OWNER_ID:
-            await interaction.response.send_message("Not authorized.", ephemeral=True)
-            return
+@upload_group.command(name="attachment", description="Upload an audio file (mp3, aac, opus)")
+@app_commands.describe(file="Audio file to upload")
+async def upload_attachment(interaction: discord.Interaction, file: discord.Attachment):
+    if not is_whitelisted(interaction.user.id):
+        await interaction.response.send_message("You are not whitelisted. Contact the instance owner.", ephemeral=True)
+        return
 
-        entries = get_upload_history()
-        if not entries:
-            await interaction.response.send_message("No uploads found.", ephemeral=True)
-            return
+    allowed_extensions = [".mp3", ".aac", ".opus"]
+    filename = file.filename.lower()
+    if not any(filename.endswith(ext) for ext in allowed_extensions):
+        await interaction.response.send_message("❌ Unsupported file type. Only MP3, AAC, and OPUS allowed.", ephemeral=True)
+        return
 
-        message = ""
-        for row in entries:
-            message += f"<@{row[0]}> : {row[4]}\n{row[2] or row[1]}\n{row[3]}\n\n"
+    save_path = os.path.join(MUSIC_DIR, file.filename)
+    await file.save(save_path)
+    size = f"{round(file.size / 1024 / 1024, 2)} MB"
+    save_upload(interaction.user.id, file.url, file.filename, size, "?")
+    await interaction.response.send_message(f"✅ File uploaded: `{file.filename}`")
 
-        await interaction.response.send_message(f"```{message}```", ephemeral=True)
+@upload_group.command(name="list", description="Show the latest uploads")
+async def upload_list(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("Not authorized.", ephemeral=True)
+        return
 
-create_upload_commands()
+    entries = get_upload_history()
+    if not entries:
+        await interaction.response.send_message("No uploads found.", ephemeral=True)
+        return
+
+    message = ""
+    for row in entries:
+        message += f"<@{row[0]}> : {row[4]}\n{row[2] or row[1]}\n{row[3]}\n\n"
+
+    await interaction.response.send_message(f"```{message}```", ephemeral=True)
+
 tree.add_command(upload_group)
 
 # --- EVENTS ---
