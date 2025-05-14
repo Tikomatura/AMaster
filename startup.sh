@@ -1,6 +1,6 @@
 #!/bin/bash
 
-REPO="Tikomatura/navidrome-discordbot"
+REPO="Tikomatura/AMaster"
 CLONE_PATH="/app/code"
 
 if [ -d "$CLONE_PATH/.git" ]; then
@@ -16,5 +16,8 @@ fi
 
 echo "🧾 Git version: $(git log -1 --pretty=format:'%h - %s (%ci)')"
 
+echo "📦 Installing Python dependencies..."
+pip install --no-cache-dir -r requirements.txt || { echo '❌ Dependency install failed'; exit 1; }
+
 echo "▶️ Starting bot..."
-python bot.py
+python3 bot.py

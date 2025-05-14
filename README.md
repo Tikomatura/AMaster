@@ -40,20 +40,24 @@ This bot is designed to run standalone in Docker or Docker Compose. It pulls the
 ### Example `docker-compose.yml`
 
 ```yaml
+version: '3.7'
+
 services:
-  discordbot:
+  amaster:
     build:
-      context: https://github.com/Tikomatura/navidrome-discordbot.git
+      context: https://github.com/Tikomatura/AMaster.git
       dockerfile: Dockerfile
-    container_name: discordbot
+    container_name: amaster
     restart: unless-stopped
     user: "999:993"
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - DISCORD_OWNER_ID=${DISCORD_OWNER_ID}
+      - MUSIC_DIR=/music
     volumes:
       - /srv/docker/music:/music
     working_dir: /app/code
+
 ```
 
 ---
