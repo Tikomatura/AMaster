@@ -1,0 +1,18 @@
+# Bytecode
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+LICENSE
+.dockerignore
+
+# Trash
+.DS_Store
