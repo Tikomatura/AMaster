@@ -13,7 +13,6 @@ else
 fi
 
 cd "$CLONE_PATH"
-pip install --no-cache-dir -r requirements.txt
 
 echo "▶️ Starting bot..."
 python bot.py
