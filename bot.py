@@ -7,6 +7,7 @@ import sqlite3
 import datetime
 import tempfile
 import json
+import re
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 OWNER_ID = int(os.getenv("DISCORD_OWNER_ID", "0"))
@@ -124,7 +125,7 @@ async def upload_link(interaction: discord.Interaction, link: str):
 
         if "spotify.com" in link:
             cmd = ["spotdl", link, "--output", MUSIC_DIR]
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         else:
             with tempfile.NamedTemporaryFile(mode='w+', delete=False) as tmpjson:
                 cmd = ["yt-dlp", "--dump-json", "-x", "--audio-format", "mp3",
@@ -168,6 +169,36 @@ async def upload_attachment(interaction: discord.Interaction, file: discord.Atta
     size = f"{round(file.size / 1024 / 1024, 2)} MB"
     save_upload(interaction.user.id, file.url, file.filename, size, "?")
     await interaction.response.send_message(f"✅ File uploaded: `{file.filename}`")
+
+@upload_group.command(name="playlist", description="Download an entire playlist from YouTube or Spotify")
+@app_commands.describe(link="Playlist URL")
+async def upload_playlist(interaction: discord.Interaction, link: str):
+    if not is_whitelisted(interaction.user.id):
+        await interaction.response.send_message("You are not whitelisted. Contact the instance owner.", ephemeral=True)
+        return
+
+    await interaction.response.send_message(f"📂 Playlist download started: {link}")
+
+    try:
+        folder_name = "playlist"
+
+        if "spotify.com" in link:
+            # spotdl handles playlist naming automatically
+            cmd = ["spotdl", link, "--output", MUSIC_DIR]
+        else:
+            # Try to extract playlist name for YouTube using yt-dlp --flat-playlist
+            folder_name = f"playlist_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            playlist_dir = os.path.join(MUSIC_DIR, folder_name)
+            os.makedirs(playlist_dir, exist_ok=True)
+            cmd = ["yt-dlp", "--yes-playlist", "-x", "--audio-format", "mp3",
+                   "-o", f"{playlist_dir}/%(title)s.%(ext)s", link]
+
+        subprocess.run(cmd, check=True)
+        save_upload(interaction.user.id, link, f"Playlist: {folder_name}", "-", "-")
+        await interaction.followup.send("✅ Playlist download finished.")
+
+    except Exception as e:
+        await interaction.followup.send(f"❌ Playlist download failed: {e}")
 
 @upload_group.command(name="list", description="Show the latest uploads")
 async def upload_list(interaction: discord.Interaction):

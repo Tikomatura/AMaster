@@ -1,16 +1,18 @@
 # Selfhosted Discord Music Downloader Bot
 
-A lightweight, containerized Discord bot that allows whitelisted users to submit music links or upload audio files via Discord. It downloads and stores audio in a shared volume, making it usable with any media server such as [Navidrome](https://www.navidrome.org/), Jellyfin, or Plex — or just as a personal collection.
+A lightweight, containerized Discord bot that allows whitelisted users to submit music links, upload audio files, or download entire playlists via Discord slash commands. The bot saves audio files in a shared volume, making them usable with any media server such as [Navidrome](https://www.navidrome.org/), Jellyfin, Plex, or simply as a personal collection.
 
 ---
 
 ## 🎯 Features
 
-- `/upload <link>` — download audio from YouTube, Spotify, SoundCloud, etc.
+- `/upload link <url>` — download audio from YouTube, Spotify, SoundCloud, etc.
+- `/upload playlist <url>` — download all tracks from a playlist (YouTube or Spotify)
+- `/upload attachment <file>` — upload local `.mp3`, `.aac`, or `.opus` files
 - `/upload list` — list recent uploads with metadata (user, title, size, duration)
 - `/whitelist add/remove <@user or user_id>` — only the bot owner can manage access
-- `/whitelist list` — see all currently whitelisted user IDs
-- Downloads are saved in a configurable `/music` directory
+- `/whitelist list` — view all currently whitelisted user IDs
+- Audio files are saved in a configurable `/music` directory
 - Whitelist and upload history are stored using a local SQLite database
 
 ---
@@ -64,6 +66,7 @@ services:
   - Launches the bot
 - The bot accepts Discord slash commands via **Direct Messages**
 - Only users in the whitelist (managed via slash commands) may upload links or files
+- Playlist downloads are stored in a dedicated subfolder inside `/music`
 
 ---
 
@@ -94,10 +97,12 @@ services:
 ## 🧪 Example Commands (in Discord)
 
 ```
-/upload https://www.youtube.com/watch?v=xyz123
+/upload link https://www.youtube.com/watch?v=xyz123
+/upload playlist https://open.spotify.com/playlist/abc456
+/upload attachment <upload .mp3 file>
+/upload list
 /whitelist add 123456789012345678
 /whitelist list
-/upload list
 ```
 
 ---
