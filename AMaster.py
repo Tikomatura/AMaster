@@ -50,70 +50,125 @@ def init_db():
         conn.commit()
     logger.info("Database initialized with tables 'whitelist' and 'uploads'.")
 
-# --- DATABASE HELPERS ---
-def add_to_whitelist(user_id):
+# --- DATABASE HELPER FUNCTIONS ---
+def add_to_whitelist(user_id: int):
     with sqlite3.connect(DB_FILE) as conn:
-        conn.execute("INSERT OR IGNORE INTO whitelist (user_id) VALUES (?)", (user_id,))
+        c = conn.cursor()
+        c.execute("INSERT OR IGNORE INTO whitelist (user_id) VALUES (?)", (user_id,))
         conn.commit()
-    logger.info(f"Added {user_id} to whitelist.")
+    logger.info(f"Added user {user_id} to whitelist.")
 
-def remove_from_whitelist(user_id):
+
+def remove_from_whitelist(user_id: int):
     with sqlite3.connect(DB_FILE) as conn:
-        conn.execute("DELETE FROM whitelist WHERE user_id = ?", (user_id,))
+        c = conn.cursor()
+        c.execute("DELETE FROM whitelist WHERE user_id = ?", (user_id,))
         conn.commit()
-    logger.info(f"Removed {user_id} from whitelist.")
+    logger.info(f"Removed user {user_id} from whitelist.")
 
-def is_whitelisted(user_id):
+
+def list_whitelisted_users() -> list:
     with sqlite3.connect(DB_FILE) as conn:
-        cur = conn.execute("SELECT 1 FROM whitelist WHERE user_id = ?", (user_id,))
-        ok = cur.fetchone() is not None
-    logger.debug(f"whitelist check {user_id}: {ok}")
-    return ok
+        c = conn.cursor()
+        c.execute("SELECT user_id FROM whitelist")
+        rows = c.fetchall()
+    user_ids = [r[0] for r in rows]
+    logger.info(f"Current whitelist: {user_ids}")
+    return user_ids
 
-def save_upload(user_id, link, title, size, duration):
+
+def is_whitelisted(user_id: int) -> bool:
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("SELECT 1 FROM whitelist WHERE user_id = ?", (user_id,))
+        result = c.fetchone() is not None
+    logger.debug(f"Whitelist check for {user_id}: {result}")
+    return result
+
+
+def save_upload(user_id: int, link: str, title: str, size: str, duration: str):
     ts = datetime.datetime.now().isoformat()
     with sqlite3.connect(DB_FILE) as conn:
-        conn.execute(
+        c = conn.cursor()
+        c.execute(
             "INSERT INTO uploads (user_id, link, title, size, duration, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
             (user_id, link, title, size, duration, ts)
         )
         conn.commit()
-    logger.info(f"Saved upload: {title} by {user_id}, size={size}, duration={duration}")
+    logger.info(f"Saved upload: user_id={user_id}, title={title}, size={size}, duration={duration}, link={link}")
 
-def get_upload_history(limit=10):
+
+def get_upload_history(limit: int = 10) -> list:
     with sqlite3.connect(DB_FILE) as conn:
-        cur = conn.execute("SELECT user_id, title, size, duration, timestamp FROM uploads ORDER BY timestamp DESC LIMIT ?", (limit,))
-        rows = cur.fetchall()
-    logger.info(f"Fetched {len(rows)} uploads.")
+        c = conn.cursor()
+        c.execute("SELECT user_id, title, size, duration, timestamp FROM uploads ORDER BY timestamp DESC LIMIT ?", (limit,))
+        rows = c.fetchall()
+    logger.info(f"Fetched last {limit} uploads.")
     return rows
 
-# --- COMMANDS ---
-@tree.command(name="upload_link", description="Download media from URL")
-@app_commands.describe(link="URL to download (Spotify, SoundCloud, YouTube)")
-async def upload_link(interaction, link: str):
-    logger.info(f"upload_link invoked by {interaction.user.id}: {link}")
+# --- SLASH COMMANDS ---
+@tree.command(name="whitelist", description="Manage the whitelist")
+@app_commands.describe(action="add/remove/list", user="User to modify (only for add/remove)")
+async def whitelist_cmd(interaction: discord.Interaction, action: str, user: discord.User = None):
+    logger.info(f"Whitelist command by {interaction.user.id}: action={action}, target={getattr(user, 'id', None)}")
+    if interaction.user.id != OWNER_ID:
+        logger.warning(f"User {interaction.user.id} attempted whitelist management.")
+        await interaction.response.send_message("Only the bot owner can manage the whitelist.", ephemeral=True)
+        return
+
+    action = action.lower()
+    if action == "add":
+        if user is None:
+            await interaction.response.send_message("Please specify a user.", ephemeral=True)
+            return
+        add_to_whitelist(user.id)
+        await interaction.response.send_message(f"User <@{user.id}> has been added to the whitelist.")
+
+    elif action == "remove":
+        if user is None:
+            await interaction.response.send_message("Please specify a user.", ephemeral=True)
+            return
+        remove_from_whitelist(user.id)
+        await interaction.response.send_message(f"User <@{user.id}> has been removed from the whitelist.")
+
+    elif action == "list":
+        ids = list_whitelisted_users()
+        mentions = [f"<@{uid}>" for uid in ids]
+        text = ", ".join(mentions) if mentions else "(empty)"
+        await interaction.response.send_message(f"Current whitelist: {text}")
+
+    else:
+        await interaction.response.send_message("Action must be 'add', 'remove', or 'list'.", ephemeral=True)
+
+# Register group
+upload_group = app_commands.Group(name="upload", description="Manage uploads")
+tree.add_command(upload_group)
+
+@upload_group.command(name="link", description="Submit a media link to download")
+@app_commands.describe(link="Media URL to download")
+async def upload_link(interaction: discord.Interaction, link: str):
+    logger.info(f"Upload link by {interaction.user.id}: {link}")
     if not is_whitelisted(interaction.user.id):
-        logger.warning(f"unauthorized upload_link by {interaction.user.id}")
+        logger.warning(f"Unauthorized upload_link by {interaction.user.id}")
         await interaction.response.send_message("You are not whitelisted.", ephemeral=True)
         return
+
     await interaction.response.send_message(f"🔗 Download started: {link}")
     try:
+        title, size, duration = "Unknown", "? MB", "?"
         before = set(os.listdir(MUSIC_DIR))
-        title = "Unknown"
-        size = "? MB"
-        duration = "?"
         if "spotify.com" in link:
-            logger.info("Using spotdl for Spotify link")
+            logger.info("Spotify download via spotdl")
             proc = subprocess.run(["spotdl", link, "--output", MUSIC_DIR], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            logger.info(f"spotdl exit {proc.returncode}")
+            logger.info(f"spotdl exit code {proc.returncode}")
             out = proc.stdout.decode() if proc.stdout else ''
             err = proc.stderr.decode() if proc.stderr else ''
             logger.debug(f"spotdl stdout: {out}")
             logger.debug(f"spotdl stderr: {err}")
             after = set(os.listdir(MUSIC_DIR))
-            new = after - before
-            if new:
-                fname = new.pop()
+            new_files = after - before
+n            if new_files:
+                fname = new_files.pop()
                 filepath = os.path.join(MUSIC_DIR, fname)
                 title = os.path.splitext(fname)[0]
                 size = f"{round(os.path.getsize(filepath)/1024/1024,2)} MB"
@@ -121,23 +176,23 @@ async def upload_link(interaction, link: str):
             else:
                 logger.warning("No new file found after spotdl run")
         else:
-            logger.info("Using yt-dlp for non-Spotify link")
-            with tempfile.NamedTemporaryFile(mode='w+', delete=False) as tmp:
+            logger.info("yt-dlp download")
+            with tempfile.NamedTemporaryFile(mode='w+', delete=False) as tmpjson:
                 proc = subprocess.run([
-                    "yt-dlp", "--dump-json", "-x", "--audio-format", "mp3", 
+                    "yt-dlp", "--dump-json", "-x", "--audio-format", "mp3",
                     "-o", f"{MUSIC_DIR}/%(title)s.%(ext)s", link
-                ], stdout=tmp, stderr=subprocess.PIPE)
-            logger.info(f"yt-dlp exit {proc.returncode}")
-            tmp.seek(0)
+                ], stdout=tmpjson, stderr=subprocess.PIPE)
+            logger.info(f"yt-dlp exit code {proc.returncode}")
+            tmpjson.seek(0)
             try:
-                data = json.load(open(tmp.name))
-                title = data.get('title', title)
+                data = json.loads(tmpjson.read())
+                title = data.get("title", title)
                 duration = f"{round(data.get('duration',0)/60,2)} min"
-                size_val = data.get('filesize') or 0
-                size = f"{round(size_val/1024/1024,2)} MB"
+                size = f"{round((data.get('filesize') or 0)/1024/1024,2)} MB"
                 logger.info(f"Parsed metadata: {title}, {duration}, {size}")
-            except Exception as e:
-                logger.error(f"Failed parse yt-dlp JSON: {e}")
+            except Exception as ex:
+                logger.error(f"Failed parse yt-dlp JSON: {ex}")
+
         # verify file
         expected = os.path.join(MUSIC_DIR, f"{title}.mp3")
         if title != "Unknown" and not os.path.exists(expected):
@@ -145,15 +200,79 @@ async def upload_link(interaction, link: str):
         save_upload(interaction.user.id, link, title, size, duration)
         await interaction.followup.send("✅ Download finished.")
     except Exception as e:
-        logger.exception("Error in upload_link")
+        logger.exception(f"Download failed: {link}")
         await interaction.followup.send(f"❌ Download failed: {e}")
 
-# rest of commands unchanged...
+@upload_group.command(name="attachment", description="Upload an audio file (mp3, aac, opus)")
+@app_commands.describe(file="Audio file to upload")
+async def upload_attachment(interaction: discord.Interaction, file: discord.Attachment):
+    logger.info(f"Upload attachment by {interaction.user.id}: {file.filename} ({file.size} bytes)")
+    if not is_whitelisted(interaction.user.id):
+        logger.warning(f"Unauthorized upload_attachment by {interaction.user.id}")
+        await interaction.response.send_message("You are not whitelisted.", ephemeral=True)
+        return
 
+    if not any(file.filename.lower().endswith(ext) for ext in [".mp3", ".aac", ".opus"]):
+        logger.warning(f"Unsupported file type: {file.filename}")
+        await interaction.response.send_message("❌ Unsupported file type. Only MP3, AAC, OPUS allowed.", ephemeral=True)
+        return
+
+    dest = os.path.join(MUSIC_DIR, file.filename)
+    await file.save(dest)
+    size_str = f"{round(file.size/1024/1024,2)} MB"
+    save_upload(interaction.user.id, file.url, file.filename, size_str, "?")
+    logger.info(f"Saved file to {dest}")
+    await interaction.response.send_message(f"✅ File uploaded: `{file.filename}`")
+
+@upload_group.command(name="playlist", description="Download an entire playlist URL")
+@app_commands.describe(link="Playlist URL to download")
+async def upload_playlist(interaction: discord.Interaction, link: str):
+    logger.info(f"Upload playlist by {interaction.user.id}: {link}")
+    if not is_whitelisted(interaction.user.id):
+        logger.warning(f"Unauthorized upload_playlist by {interaction.user.id}")
+        await interaction.response.send_message("You are not whitelisted.", ephemeral=True)
+        return
+
+    await interaction.response.send_message(f"📥 Playlist download started: {link}")
+    try:
+        proc = subprocess.run([
+            "yt-dlp", "-x", "--audio-format", "mp3",
+            "--yes-playlist", "-o", f"{MUSIC_DIR}/%(playlist_title)s/%(title)s.%(ext)s", link
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        logger.info(f"yt-dlp playlist exit code {proc.returncode}")
+        await interaction.followup.send("✅ Playlist download finished.")
+    except Exception as e:
+        logger.exception(f"Playlist download failed: {link}")
+        await interaction.followup.send(f"❌ Playlist download failed: {e}")
+
+@upload_group.command(name="list", description="Show latest uploads")
+@app_commands.describe(limit="Number of items to show (max 20)")
+async def upload_list(interaction: discord.Interaction, limit: int = 10):
+    logger.info(f"Upload list by {interaction.user.id}, limit={limit}")
+    if not is_whitelisted(interaction.user.id):
+        logger.warning(f"Unauthorized upload_list by {interaction.user.id}")
+        await interaction.response.send_message("You are not whitelisted.", ephemeral=True)
+        return
+
+    limit = min(limit, 20)
+    rows = get_upload_history(limit)
+    embed = discord.Embed(title="Latest Uploads", color=0x00ff00)
+    for user_id, title, size, duration, ts in rows:
+        time_str = datetime.datetime.fromisoformat(ts).strftime('%Y-%m-%d %H:%M')
+        embed.add_field(
+            name=f"{title}",
+            value=f"From: <@{user_id}> | Size: {size} | Duration: {duration} | {time_str}",
+            inline=False
+        )
+    await interaction.response.send_message(embed=embed)
+
+# --- EVENTS & RUN ---
 @client.event
 async def on_ready():
     init_db()
-    await tree.sync()
+    if not getattr(client, 'commands_synced', False):
+        await tree.sync()
+        client.commands_synced = True
     logger.info(f"Bot ready as {client.user}")
 
 client.run(TOKEN)
