@@ -149,7 +149,7 @@ async def upload_link(interaction: discord.Interaction, link: str):
             logger.info("Spotify download via spotdl")
             before = set(os.listdir(MUSIC_DIR))
             proc = subprocess.run(
-                ["spotdl", link, "--output", f"{MUSIC_DIR}/%(title)s.%(ext)s"],
+                ["spotdl", link, "--output", MUSIC_DIR],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
