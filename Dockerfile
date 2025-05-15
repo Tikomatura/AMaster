@@ -19,10 +19,10 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Add app
 WORKDIR /app
-COPY bot.py /app/bot.py
+COPY bot.py /app/AMaster.py
 
 # Set permissions and switch user
 RUN chown -R amaster:amaster /app
 USER amaster
 
-CMD ["python", "/app/bot.py"]
+CMD ["python", "/app/AMaster.py"]
