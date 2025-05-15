@@ -74,6 +74,7 @@ def list_whitelisted_users() -> list:
     logger.info(f"Current whitelist: {user_ids}")
     return user_ids
 
+
 def is_whitelisted(user_id: int) -> bool:
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
@@ -81,6 +82,7 @@ def is_whitelisted(user_id: int) -> bool:
         result = c.fetchone() is not None
     logger.debug(f"Whitelist check for {user_id}: {result}")
     return result
+
 
 def save_upload(user_id: int, link: str, title: str, size: str, duration: str):
     with sqlite3.connect(DB_FILE) as conn:
@@ -92,6 +94,7 @@ def save_upload(user_id: int, link: str, title: str, size: str, duration: str):
         conn.commit()
     logger.info(f"Saved upload: user_id={user_id}, title={title}, size={size}, duration={duration}, link={link}")
 
+
 def get_upload_history(limit: int = 10) -> list:
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
@@ -99,6 +102,14 @@ def get_upload_history(limit: int = 10) -> list:
         rows = c.fetchall()
     logger.info(f"Fetched last {limit} uploads.")
     return rows
+
+# --- UTILITY: LIST ALL FILES ---
+def list_all_files(root_dir: str) -> set:
+    files = set()
+    for dirpath, _, filenames in os.walk(root_dir):
+        for f in filenames:
+            files.add(os.path.join(dirpath, f))
+    return files
 
 # --- SLASH COMMANDS ---
 @tree.command(name="whitelist", description="Manage the whitelist")
@@ -147,23 +158,28 @@ async def upload_link(interaction: discord.Interaction, link: str):
         # --- Spotify branch ---
         if "spotify.com" in link:
             logger.info("Spotify download via spotdl")
-            before = set(os.listdir(MUSIC_DIR))
-            proc = subprocess.run(
-                ["spotdl", link, "--output", MUSIC_DIR],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
+            before = list_all_files(MUSIC_DIR)
+            proc = subprocess.run([
+                "spotdl", link,
+                "--output", MUSIC_DIR,
+                "--filename-format", "{title}.{output_ext}",
+                "--verbose"
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # log full stdout/stderr
+            out = proc.stdout.decode(errors="ignore")
+            err = proc.stderr.decode(errors="ignore")
+            logger.debug(f"spotdl stdout:\n{out}")
+            logger.debug(f"spotdl stderr:\n{err}")
             logger.info(f"spotdl exit code {proc.returncode}")
-            after = set(os.listdir(MUSIC_DIR))
-            new = after - before
-            mp3s = [f for f in new if f.lower().endswith(".mp3")]
+            after = list_all_files(MUSIC_DIR)
+            new_files = after - before
+            mp3s = [f for f in new_files if f.lower().endswith(".mp3")]
             if not mp3s:
-                logger.error(f"Kein neues MP3 in {MUSIC_DIR}: {new}")
-                logger.error(proc.stderr.decode())
+                logger.error(f"Kein neues MP3 in {MUSIC_DIR}: {new_files}")
                 await interaction.followup.send("❌ Download offenbar fehlgeschlagen – keine neue Datei gefunden.")
                 return
-            filename = mp3s[0]
-            filepath = os.path.join(MUSIC_DIR, filename)
+            filepath = mp3s[0]
+            filename = os.path.basename(filepath)
             title = os.path.splitext(filename)[0]
             size = f"{round(os.path.getsize(filepath)/1024/1024,2)} MB"
             duration = "?"
@@ -171,16 +187,13 @@ async def upload_link(interaction: discord.Interaction, link: str):
         # --- yt-dlp branch ---
         else:
             logger.info("yt-dlp download")
-            before = set(os.listdir(MUSIC_DIR))
+            before = list_all_files(MUSIC_DIR)
             with tempfile.NamedTemporaryFile(mode='w+', delete=False) as tmpjson:
-                proc = subprocess.run(
-                    ["yt-dlp", "--dump-json", "-x", "--audio-format", "mp3",
-                     "-o", f"{MUSIC_DIR}/%(title)s.%(ext)s", link],
-                    stdout=tmpjson,
-                    stderr=subprocess.PIPE
-                )
+                proc = subprocess.run([
+                    "yt-dlp", "--dump-json", "-x", "--audio-format", "mp3",
+                    "-o", f"{MUSIC_DIR}/%(title)s.%(ext)s", link
+                ], stdout=tmpjson, stderr=subprocess.PIPE)
             logger.info(f"yt-dlp exit code {proc.returncode}")
-            # parse metadata if possible
             try:
                 tmpjson.seek(0)
                 data = json.loads(tmpjson.read())
@@ -190,20 +203,18 @@ async def upload_link(interaction: discord.Interaction, link: str):
                 logger.info(f"Metadata: {title}, {duration}, {size}")
             except Exception as ex:
                 logger.error(f"JSON parse failed: {ex}")
-            after = set(os.listdir(MUSIC_DIR))
-            new = after - before
-            mp3s = [f for f in new if f.lower().endswith(".mp3")]
+            after = list_all_files(MUSIC_DIR)
+            new_files = after - before
+            mp3s = [f for f in new_files if f.lower().endswith(".mp3")]
             if not mp3s:
-                logger.error(f"Kein neues MP3 in {MUSIC_DIR}: {new}")
-                logger.error(proc.stderr.decode())
+                logger.error(f"Kein neues MP3 in {MUSIC_DIR}: {new_files}")
                 await interaction.followup.send("❌ Download offenbar fehlgeschlagen – keine neue Datei gefunden.")
                 return
-            filename = mp3s[0]
-            filepath = os.path.join(MUSIC_DIR, filename)
+            filepath = mp3s[0]
+            filename = os.path.basename(filepath)
             if title == "Unknown":
                 title = os.path.splitext(filename)[0]
             size = f"{round(os.path.getsize(filepath)/1024/1024,2)} MB"
-            duration = duration or "?"
             logger.info(f"Gefundene Datei: {filepath}")
 
         # --- Existence check ---
@@ -250,11 +261,10 @@ async def upload_playlist(interaction: discord.Interaction, link: str):
 
     await interaction.response.send_message(f"📥 Playlist download started: {link}")
     try:
-        proc = subprocess.run(
-            ["yt-dlp", "-x", "--audio-format", "mp3", "--yes-playlist",
-             "-o", f"{MUSIC_DIR}/%(playlist_title)s/%(title)s.%(ext)s", link],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
+        proc = subprocess.run([
+            "yt-dlp", "-x", "--audio-format", "mp3", "--yes-playlist",
+            "-o", f"{MUSIC_DIR}/%(playlist_title)s/%(title)s.%(ext)s", link
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         logger.info(f"yt-dlp playlist exit code {proc.returncode}")
         await interaction.followup.send("✅ Playlist download finished.")
     except Exception as e:
