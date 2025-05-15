@@ -13,7 +13,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
 )
-logger = logging.getLogger('music_bot')
+logger = logging.getLogger('music_bot v0.1')
 
 # --- CONFIGURATION ---
 TOKEN = os.getenv("DISCORD_TOKEN")
