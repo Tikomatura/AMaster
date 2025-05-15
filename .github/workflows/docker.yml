@@ -22,9 +22,18 @@ jobs:
         username: ${{ secrets.DOCKERHUB_USER }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Build and push Docker image
+    - name: Log in to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push to both registries
       uses: docker/build-push-action@v5
       with:
         context: .
         push: true
-        tags: tikomatura/amaster:latest
+        tags: |
+          tikomatura/amaster:latest
+          ghcr.io/${{ github.repository_owner }}/amaster:latest
