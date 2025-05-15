@@ -46,6 +46,7 @@ def init_db():
                 timestamp TEXT
             )
         """)
+        # Ensure owner is whitelisted
         c.execute("INSERT OR IGNORE INTO whitelist (user_id) VALUES (?)", (OWNER_ID,))
         conn.commit()
     logger.info("Database initialized with tables 'whitelist' and 'uploads'.")
@@ -87,13 +88,12 @@ def is_whitelisted(user_id: int) -> bool:
 
 
 def save_upload(user_id: int, link: str, title: str, size: str, duration: str):
-    ts = datetime.datetime.now().isoformat()
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        c.execute(
-            "INSERT INTO uploads (user_id, link, title, size, duration, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, link, title, size, duration, ts)
-        )
+        c.execute("""
+            INSERT INTO uploads (user_id, link, title, size, duration, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (user_id, link, title, size, duration, datetime.datetime.now().isoformat()))
         conn.commit()
     logger.info(f"Saved upload: user_id={user_id}, title={title}, size={size}, duration={duration}, link={link}")
 
@@ -156,47 +156,31 @@ async def upload_link(interaction: discord.Interaction, link: str):
     await interaction.response.send_message(f"🔗 Download started: {link}")
     try:
         title, size, duration = "Unknown", "? MB", "?"
-        before = set(os.listdir(MUSIC_DIR))
         if "spotify.com" in link:
             logger.info("Spotify download via spotdl")
             proc = subprocess.run(["spotdl", link, "--output", MUSIC_DIR], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             logger.info(f"spotdl exit code {proc.returncode}")
-            out = proc.stdout.decode() if proc.stdout else ''
-            err = proc.stderr.decode() if proc.stderr else ''
-            logger.debug(f"spotdl stdout: {out}")
-            logger.debug(f"spotdl stderr: {err}")
-            after = set(os.listdir(MUSIC_DIR))
-            new_files = after - before
-n            if new_files:
-                fname = new_files.pop()
-                filepath = os.path.join(MUSIC_DIR, fname)
-                title = os.path.splitext(fname)[0]
-                size = f"{round(os.path.getsize(filepath)/1024/1024,2)} MB"
-                logger.info(f"Detected new file: {filepath}")
-            else:
-                logger.warning("No new file found after spotdl run")
         else:
             logger.info("yt-dlp download")
             with tempfile.NamedTemporaryFile(mode='w+', delete=False) as tmpjson:
-                proc = subprocess.run([
-                    "yt-dlp", "--dump-json", "-x", "--audio-format", "mp3",
-                    "-o", f"{MUSIC_DIR}/%(title)s.%(ext)s", link
-                ], stdout=tmpjson, stderr=subprocess.PIPE)
-            logger.info(f"yt-dlp exit code {proc.returncode}")
-            tmpjson.seek(0)
-            try:
-                data = json.loads(tmpjson.read())
-                title = data.get("title", title)
-                duration = f"{round(data.get('duration',0)/60,2)} min"
-                size = f"{round((data.get('filesize') or 0)/1024/1024,2)} MB"
-                logger.info(f"Parsed metadata: {title}, {duration}, {size}")
-            except Exception as ex:
-                logger.error(f"Failed parse yt-dlp JSON: {ex}")
+                proc = subprocess.run(["yt-dlp", "--dump-json", "-x", "--audio-format", "mp3", "-o", f"{MUSIC_DIR}/%(title)s.%(ext)s", link], stdout=tmpjson, stderr=subprocess.PIPE)
+                logger.info(f"yt-dlp exit code {proc.returncode}")
+                tmpjson.seek(0)
+                try:
+                    data = json.loads(tmpjson.read())
+                    title = data.get("title", title)
+                    duration = f"{round(data.get('duration',0)/60,2)} min"
+                    size = f"{round((data.get('filesize') or 0)/1024/1024,2)} MB"
+                    logger.info(f"Metadata: {title}, {duration}, {size}")
+                except Exception as ex:
+                    logger.error(f"JSON parse failed: {ex}")
 
-        # verify file
-        expected = os.path.join(MUSIC_DIR, f"{title}.mp3")
-        if title != "Unknown" and not os.path.exists(expected):
-            logger.warning(f"Expected file missing: {expected}")
+        filepath = os.path.join(MUSIC_DIR, f"{title}.mp3")
+        if title != "Unknown" and os.path.exists(filepath):
+            logger.warning(f"Exists: {filepath}")
+            await interaction.followup.send("⚠️ This file already exists.")
+            return
+
         save_upload(interaction.user.id, link, title, size, duration)
         await interaction.followup.send("✅ Download finished.")
     except Exception as e:
@@ -235,10 +219,7 @@ async def upload_playlist(interaction: discord.Interaction, link: str):
 
     await interaction.response.send_message(f"📥 Playlist download started: {link}")
     try:
-        proc = subprocess.run([
-            "yt-dlp", "-x", "--audio-format", "mp3",
-            "--yes-playlist", "-o", f"{MUSIC_DIR}/%(playlist_title)s/%(title)s.%(ext)s", link
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = subprocess.run(["yt-dlp", "-x", "--audio-format", "mp3", "--yes-playlist", "-o", f"{MUSIC_DIR}/%(playlist_title)s/%(title)s.%(ext)s", link], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         logger.info(f"yt-dlp playlist exit code {proc.returncode}")
         await interaction.followup.send("✅ Playlist download finished.")
     except Exception as e:
@@ -257,11 +238,11 @@ async def upload_list(interaction: discord.Interaction, limit: int = 10):
     limit = min(limit, 20)
     rows = get_upload_history(limit)
     embed = discord.Embed(title="Latest Uploads", color=0x00ff00)
-    for user_id, title, size, duration, ts in rows:
-        time_str = datetime.datetime.fromisoformat(ts).strftime('%Y-%m-%d %H:%M')
+    for user_id, title, size,	duration, ts in rows:
+        time = datetime.datetime.fromisoformat(ts).strftime('%Y-%m-%d %H:%M')
         embed.add_field(
             name=f"{title}",
-            value=f"From: <@{user_id}> | Size: {size} | Duration: {duration} | {time_str}",
+            value=f"From: <@{user_id}> | Size: {size} | Duration: {duration} | {time}",
             inline=False
         )
     await interaction.response.send_message(embed=embed)
