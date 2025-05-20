@@ -3,3 +3,4 @@ __pycache__/
 .env
 botdata.db
 .DS_Store
+.yt_cookies.txt
