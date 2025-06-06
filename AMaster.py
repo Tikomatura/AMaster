@@ -13,7 +13,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
 )
-logger = logging.getLogger('music_bot v0.1')
+logger = logging.getLogger('music_bot v0.2')
 
 # --- CONFIGURATION ---
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -154,10 +154,9 @@ async def upload_link(interaction: discord.Interaction, link: str):
         if "spotify.com" in link:
             logger.info("Spotify download via spotdl")
             proc = subprocess.run([
-                "spotdl", link,
+                "spotdl", "download", link,
                 "--output", MUSIC_DIR,
-                "--filename-format", "{title}.{output_ext}",
-                "--verbose"
+                "--log-level", "DEBUG"
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if proc.returncode != 0:
                 err = proc.stderr.decode(errors="ignore")
