@@ -13,8 +13,8 @@ services:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - DISCORD_OWNER_ID=${DISCORD_OWNER_ID}
       - MUSIC_DIR=/music
-      - YTDL_COOKIES_PATH=/app/.yt_cookies.txt
+      - COOKIES_PATH=/app/.yt_cookies.txt
     volumes:
       - /srv/docker/navidrome/music:/music
-      - ./.yt_cookies.txt:/app/.yt_cookies.txt:ro
+      - ./.yt_cookies.txt:/app/.yt_cookies.txt
     working_dir: /app
