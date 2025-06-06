@@ -20,6 +20,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 OWNER_ID = int(os.getenv("DISCORD_OWNER_ID", "0"))
 MUSIC_DIR = os.getenv("MUSIC_DIR", "/music")
 DB_FILE = "botdata.db"
+COOKIES_PATH = os.getenv("COOKIES_PATH", ".yt_cookies.txt")
 
 # --- DISCORD CLIENT ---
 intents = discord.Intents.default()
@@ -156,7 +157,8 @@ async def upload_link(interaction: discord.Interaction, link: str):
             proc = subprocess.run([
                 "spotdl", "download", link,
                 "--output", MUSIC_DIR,
-                "--log-level", "DEBUG"
+                "--log-level", "DEBUG",
+                "--cookie-file", COOKIES_PATH
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if proc.returncode != 0:
                 err = proc.stderr.decode(errors="ignore")
@@ -182,7 +184,8 @@ async def upload_link(interaction: discord.Interaction, link: str):
             # Audio download
             proc_dl = subprocess.run([
                 "yt-dlp", "-x", "--audio-format", "mp3",
-                "-o", f"{MUSIC_DIR}/%(title)s.%(ext)s", link
+                "-o", f"{MUSIC_DIR}/%(title)s.%(ext)s", link,
+                "--cookies", COOKIES_PATH
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if proc_dl.returncode != 0:
                 err = proc_dl.stderr.decode(errors="ignore")
